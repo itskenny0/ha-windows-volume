@@ -1,0 +1,68 @@
+# Builds the Windows binary on every push to main and publishes a release
+# tagged with the UTC build time (YYYYMMDD-HHMM). The release notes link
+# back to the source commit; the .exe is attached as a downloadable asset.
+#
+# Runs on Ubuntu because the build is CGO-free and we cross-compile via
+# GOOS/GOARCH — much faster (and cheaper) than a windows-latest runner.
+
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Don't pile up releases if pushes land close together.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+
+      - name: Test
+        run: go test -race ./...
+
+      - name: Build
+        run: make windows
+
+      - name: Compute tag
+        id: tag
+        run: |
+          tag="$(date -u +%Y%m%d-%H%M)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Rename artifact
+        run: |
+          mkdir -p dist
+          cp bin/ha-volume.exe "dist/ha-volume-${{ steps.tag.outputs.tag }}.exe"
+          sha256sum "dist/ha-volume-${{ steps.tag.outputs.tag }}.exe" \
+            > "dist/ha-volume-${{ steps.tag.outputs.tag }}.exe.sha256"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.tag.outputs.tag }}"
+          gh release create "$tag" \
+            --target "${{ github.sha }}" \
+            --title "$tag" \
+            --notes "Automated build of \`${{ github.sha }}\`." \
+            "dist/ha-volume-${tag}.exe" \
+            "dist/ha-volume-${tag}.exe.sha256"

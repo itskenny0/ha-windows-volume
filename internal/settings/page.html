@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>HA Volume — Settings</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --border: #30363d;
+    --text: #e6edf3;
+    --mute: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --warn: #d29922;
+    --err: #f85149;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px;
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px 0; }
+  .sub { color: var(--mute); margin: 0 0 24px 0; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 4px 0; font-size: 15px; font-weight: 600; }
+  .card .desc { color: var(--mute); font-size: 13px; margin: 0 0 16px 0; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  label { display: block; font-size: 12px; color: var(--mute); margin-bottom: 4px; }
+  input[type=text], input[type=number], input[type=url] {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font: inherit; width: 100%; min-width: 0;
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button {
+    background: var(--accent); color: #0d1117; border: 0;
+    padding: 8px 14px; border-radius: 6px; font-weight: 600;
+    cursor: pointer; font: inherit;
+  }
+  button.ghost {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button.danger {
+    background: transparent; color: var(--err);
+    border: 1px solid var(--border);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--border);
+  }
+  .pill::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--mute);
+  }
+  .pill.ok::before { background: var(--ok); }
+  .pill.err::before { background: var(--err); }
+  .pill.warn::before { background: var(--warn); }
+  .stack > * + * { margin-top: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 0;
+  }
+  .toggle + .toggle { border-top: 1px solid var(--border); }
+  .switch { position: relative; width: 38px; height: 22px; }
+  .switch input { display: none; }
+  .switch span {
+    position: absolute; inset: 0; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 999px; cursor: pointer;
+    transition: background .15s;
+  }
+  .switch span::after {
+    content: ''; position: absolute; left: 2px; top: 2px;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--text);
+    transition: transform .15s;
+  }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(16px); background: #0d1117; }
+  .auth-status {
+    min-height: 22px; font-size: 13px; color: var(--mute);
+  }
+  .auth-status.err { color: var(--err); }
+  .auth-status.ok { color: var(--ok); }
+  details { margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--mute); }
+  pre.logs {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; font-size: 12px;
+    max-height: 240px; overflow: auto; margin: 8px 0 0 0;
+  }
+  .footer { color: var(--mute); font-size: 12px; text-align: center; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>HA Volume</h1>
+<p class="sub">Mirrors the Windows master volume to Home Assistant.</p>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div>
+      <h2 style="margin:0">Status</h2>
+      <p class="desc" id="statusLine">Loading…</p>
+    </div>
+    <span id="statusPill" class="pill">connecting</span>
+  </div>
+</div>
+
+<div class="card" id="onboardCard">
+  <h2>Connect to Home Assistant</h2>
+  <p class="desc">Enter the URL of your Home Assistant instance. We'll open your default browser
+  so you can log in and authorise this app. No password is ever sent through this app.</p>
+  <div class="stack">
+    <div>
+      <label for="hassUrl">Home Assistant URL</label>
+      <input id="hassUrl" type="url" placeholder="https://homeassistant.local:8123">
+    </div>
+    <div class="row">
+      <button id="connectBtn">Authorise…</button>
+      <span class="auth-status" id="authStatus"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card" id="connectedCard" style="display:none">
+  <h2>Connected</h2>
+  <p class="desc">Connected to <code id="hassUrlConnected"></code>.</p>
+  <div class="row">
+    <button class="ghost" id="reconnectBtn">Reconnect</button>
+    <button class="danger" id="disconnectBtn">Disconnect / reset</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Entities</h2>
+  <p class="desc">These are the Home Assistant helper entities this app reads from and writes to. The defaults are derived from the machine hostname. They are auto-created on first connect.</p>
+  <div class="stack">
+    <div class="grid2">
+      <div>
+        <label for="entityVolume">Volume (input_number)</label>
+        <input id="entityVolume" type="text" placeholder="input_number.windows_volume_…">
+      </div>
+      <div>
+        <label for="entityMuted">Mute (input_boolean)</label>
+        <input id="entityMuted" type="text" placeholder="input_boolean.windows_muted_…">
+      </div>
+    </div>
+    <div class="grid2">
+      <div>
+        <label for="step">Slider step</label>
+        <input id="step" type="number" min="1" max="50" value="1">
+      </div>
+      <div></div>
+    </div>
+    <div class="row">
+      <button id="saveBtn">Save</button>
+      <span id="saveMsg" class="auth-status"></span>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Behaviour</h2>
+  <div class="toggle">
+    <div>
+      <div>Run at login</div>
+      <div class="desc" style="margin:0">Start automatically when you sign in to Windows.</div>
+    </div>
+    <label class="switch"><input type="checkbox" id="startupToggle"><span></span></label>
+  </div>
+</div>
+
+<details>
+  <summary>Diagnostics</summary>
+  <pre class="logs" id="logs">loading…</pre>
+</details>
+
+<div class="footer">Listening on <code id="myUrl"></code>. You can close this tab; the app keeps running in the tray.</div>
+
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function refreshStatus() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    $('statusLine').textContent = st.message || (st.connected ? 'Connected' : 'Not connected');
+    const pill = $('statusPill');
+    pill.className = 'pill ' + (st.connected ? 'ok' : (st.message?.startsWith('Error') ? 'err' : 'warn'));
+    pill.textContent = st.connected ? 'connected' : (st.message?.startsWith('Authorising') ? 'authorising' : 'disconnected');
+  } catch (e) { /* server gone */ }
+}
+
+async function refreshConfig() {
+  const cfg = await (await fetch('/api/config')).json();
+  $('entityVolume').value = cfg.entity_volume || '';
+  $('entityMuted').value = cfg.entity_muted || '';
+  $('step').value = cfg.step || 1;
+  $('startupToggle').checked = !!cfg.run_at_startup;
+  if (cfg.home_assistant_url) {
+    $('onboardCard').style.display = 'none';
+    $('connectedCard').style.display = '';
+    $('hassUrlConnected').textContent = cfg.home_assistant_url;
+  } else {
+    $('onboardCard').style.display = '';
+    $('connectedCard').style.display = 'none';
+  }
+}
+
+async function refreshLogs() {
+  try {
+    const r = await (await fetch('/api/logs')).json();
+    $('logs').textContent = (r.lines || []).slice(-100).join('\n') || '(no logs yet)';
+  } catch {}
+}
+
+$('connectBtn').addEventListener('click', async () => {
+  const url = $('hassUrl').value.trim();
+  if (!url) { $('authStatus').textContent = 'Enter a URL first.'; return; }
+  $('authStatus').className = 'auth-status';
+  $('authStatus').textContent = 'Starting…';
+  $('connectBtn').disabled = true;
+  try {
+    const r = await fetch('/api/authorize', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({hass_url: url})
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const es = new EventSource('/api/authorize/stream');
+    es.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(ev.data);
+        $('authStatus').textContent = m.text;
+        $('authStatus').className = 'auth-status ' + (m.stage === 'error' ? 'err' : (m.stage === 'success' ? 'ok' : ''));
+        if (m.stage === 'success') {
+          es.close();
+          setTimeout(() => { refreshConfig(); refreshStatus(); }, 400);
+          $('connectBtn').disabled = false;
+        } else if (m.stage === 'error') {
+          es.close();
+          $('connectBtn').disabled = false;
+        }
+      } catch {}
+    };
+    es.addEventListener('done', () => { es.close(); $('connectBtn').disabled = false; });
+    es.onerror = () => { es.close(); $('connectBtn').disabled = false; };
+  } catch (e) {
+    $('authStatus').className = 'auth-status err';
+    $('authStatus').textContent = e.message || String(e);
+    $('connectBtn').disabled = false;
+  }
+});
+
+$('saveBtn').addEventListener('click', async () => {
+  const body = {
+    entity_volume: $('entityVolume').value.trim(),
+    entity_muted: $('entityMuted').value.trim(),
+    step: parseInt($('step').value, 10) || 1,
+  };
+  $('saveMsg').className = 'auth-status';
+  $('saveMsg').textContent = 'Saving…';
+  const r = await fetch('/api/config', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  if (r.ok) {
+    $('saveMsg').className = 'auth-status ok';
+    $('saveMsg').textContent = 'Saved. Reconnecting…';
+    await fetch('/api/reconnect', {method:'POST'});
+    setTimeout(refreshStatus, 600);
+  } else {
+    $('saveMsg').className = 'auth-status err';
+    $('saveMsg').textContent = await r.text();
+  }
+});
+
+$('startupToggle').addEventListener('change', async (e) => {
+  await fetch('/api/startup', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({enable: e.target.checked})
+  });
+});
+
+$('reconnectBtn')?.addEventListener('click', async () => {
+  await fetch('/api/reconnect', {method:'POST'});
+  setTimeout(refreshStatus, 400);
+});
+
+$('disconnectBtn')?.addEventListener('click', async () => {
+  if (!confirm('Disconnect and forget the saved token? You will need to re-authorise.')) return;
+  await fetch('/api/disconnect', {method:'POST'});
+  setTimeout(() => { refreshConfig(); refreshStatus(); }, 400);
+});
+
+$('myUrl').textContent = location.host;
+
+refreshStatus();
+refreshConfig();
+refreshLogs();
+setInterval(refreshStatus, 1500);
+setInterval(refreshLogs, 3000);
+</script>
+</body>
+</html>

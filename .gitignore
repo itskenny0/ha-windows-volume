@@ -1,0 +1,7 @@
+bin/
+*.exe
+*.log
+
+# IDE
+.vscode/
+.idea/
