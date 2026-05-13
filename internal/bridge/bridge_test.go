@@ -23,6 +23,11 @@ import (
 type fakeHA struct {
 	t *testing.T
 
+	// writeMu serialises WriteJSON. gorilla/websocket forbids concurrent
+	// writes on a single Conn; the test reader goroutine and Push() would
+	// otherwise race.
+	writeMu sync.Mutex
+
 	mu     sync.Mutex
 	conn   *websocket.Conn
 	states map[string]string // entity_id → state
@@ -30,6 +35,20 @@ type fakeHA struct {
 
 	// recorded service calls
 	calls []serviceCall
+}
+
+// write is the only path that talks to the websocket. Holds writeMu so
+// Push() and loop()'s response writes don't race.
+func (f *fakeHA) write(v any) error {
+	f.mu.Lock()
+	c := f.conn
+	f.mu.Unlock()
+	if c == nil {
+		return nil
+	}
+	f.writeMu.Lock()
+	defer f.writeMu.Unlock()
+	return c.WriteJSON(v)
 }
 
 type serviceCall struct {
@@ -56,12 +75,12 @@ func newFakeHA(t *testing.T) (string, *fakeHA) {
 		f.mu.Lock()
 		f.conn = c
 		f.mu.Unlock()
-		_ = c.WriteJSON(map[string]any{"type": "auth_required"})
+		_ = f.write(map[string]any{"type": "auth_required"})
 		var auth map[string]any
 		if err := c.ReadJSON(&auth); err != nil {
 			return
 		}
-		_ = c.WriteJSON(map[string]any{"type": "auth_ok"})
+		_ = f.write(map[string]any{"type": "auth_ok"})
 		f.loop()
 	}))
 	t.Cleanup(srv.Close)
@@ -88,7 +107,7 @@ func (f *fakeHA) loop() {
 			}
 			f.mu.Unlock()
 			b, _ := json.Marshal(out)
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true, "result": json.RawMessage(b),
 			})
 		case "input_number/create":
@@ -96,7 +115,7 @@ func (f *fakeHA) loop() {
 			f.mu.Lock()
 			f.states["input_number."+name] = "50"
 			f.mu.Unlock()
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true,
 			})
 		case "input_boolean/create":
@@ -104,18 +123,18 @@ func (f *fakeHA) loop() {
 			f.mu.Lock()
 			f.states["input_boolean."+name] = "off"
 			f.mu.Unlock()
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true,
 			})
 		case "subscribe_events":
 			f.mu.Lock()
 			f.subID = uint64(id)
 			f.mu.Unlock()
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true,
 			})
 		case "unsubscribe_events":
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true,
 			})
 		case "call_service":
@@ -142,7 +161,7 @@ func (f *fakeHA) loop() {
 				}
 			}
 			f.mu.Unlock()
-			_ = f.conn.WriteJSON(map[string]any{
+			_ = f.write(map[string]any{
 				"id": id, "type": "result", "success": true,
 			})
 		}
@@ -159,7 +178,7 @@ func (f *fakeHA) Push(entity, state string) {
 	if c == nil || id == 0 {
 		return
 	}
-	_ = c.WriteJSON(map[string]any{
+	_ = f.write(map[string]any{
 		"id":   id,
 		"type": "event",
 		"event": map[string]any{
@@ -323,11 +342,16 @@ func TestBridge_RemoteChangeUpdatesLocal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
+	// Pre-compute the entity ids the same way the bridge would, so the
+	// test goroutine doesn't read cfg fields the bridge goroutine is also
+	// writing.
+	entVol := "input_number.windows_volume_" + hostSlug()
+
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, cfg, "token", ac) }()
 
 	time.Sleep(400 * time.Millisecond)
-	fake.Push(cfg.EntityVolume, "37")
+	fake.Push(entVol, "37")
 
 	if !waitFor(t, 2*time.Second, func() bool {
 		v, _ := ac.Volume()
@@ -348,6 +372,8 @@ func TestBridge_EchoIsSuppressed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 
+	entVol := "input_number.windows_volume_" + hostSlug()
+
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, cfg, "token", ac) }()
 
@@ -359,7 +385,7 @@ func TestBridge_EchoIsSuppressed(t *testing.T) {
 	ac.LocalChange(60, false)
 	time.Sleep(300 * time.Millisecond)
 	// HA confirms by pushing the same value back to the bridge.
-	fake.Push(cfg.EntityVolume, "60")
+	fake.Push(entVol, "60")
 	time.Sleep(500 * time.Millisecond)
 
 	setCalls := 0
